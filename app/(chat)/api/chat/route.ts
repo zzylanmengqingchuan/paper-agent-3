@@ -12,8 +12,9 @@ import type { RequestHints } from "@/lib/ai/prompts";
 import {
   createStreamId,
   deleteChatById,
+  getDailyChatRequestCountByUserId,
   getChatById,
-  getMessageCountByUserId,
+  incrementDailyChatRequestCountByUserId,
   getMessagesByChatId,
   saveChat,
   saveMessages,
@@ -59,17 +60,9 @@ export async function POST(request: Request) {
 
     const userType: UserType = session.user.type;
 
-    const messageCount = await getMessageCountByUserId({
-      id: session.user.id,
-      differenceInHours: 24,
-    });
-
-    if (messageCount > entitlementsByUserType[userType].maxMessagesPerDay) {
-      return new ChatSDKError("rate_limit:chat").toResponse();
-    }
-
     const chat = await getChatById({ id });
     let messagesFromDb: DBMessage[] = [];
+    let shouldCreateChat = false;
 
     if (chat) {
       if (chat.userId !== session.user.id) {
@@ -78,6 +71,32 @@ export async function POST(request: Request) {
       // Only fetch messages if chat already exists
       messagesFromDb = await getMessagesByChatId({ id });
     } else {
+      shouldCreateChat = true;
+    }
+
+    const maxChatRequestsPerDay =
+      entitlementsByUserType[userType].maxChatRequestsPerDay;
+    const requestTime = new Date();
+    const currentDailyChatRequests = await getDailyChatRequestCountByUserId({
+      userId: session.user.id,
+      now: requestTime,
+    });
+
+    if (currentDailyChatRequests >= maxChatRequestsPerDay) {
+      return new ChatSDKError("rate_limit:chat").toResponse();
+    }
+
+    const updatedCount = await incrementDailyChatRequestCountByUserId({
+      userId: session.user.id,
+      maxRequestsPerDay: maxChatRequestsPerDay,
+      now: requestTime,
+    });
+
+    if (updatedCount === null) {
+      return new ChatSDKError("rate_limit:chat").toResponse();
+    }
+
+    if (shouldCreateChat) {
       const title = await generateTitleFromUserMessage({
         message,
       });
@@ -88,7 +107,6 @@ export async function POST(request: Request) {
         title,
         visibility: selectedVisibilityType,
       });
-      // New chat - no need to fetch messages, it's empty
     }
 
     const uiMessages = [...convertToUIMessages(messagesFromDb), message];

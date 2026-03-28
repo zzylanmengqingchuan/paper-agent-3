@@ -2,12 +2,14 @@ import type { InferSelectModel } from "drizzle-orm";
 import {
   boolean,
   foreignKey,
+  integer,
   json,
   jsonb,
   pgTable,
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
@@ -171,3 +173,25 @@ export const stream = pgTable(
 );
 
 export type Stream = InferSelectModel<typeof stream>;
+
+export const dailyChatUsage = pgTable(
+  "DailyChatUsage",
+  {
+    id: uuid("id").primaryKey().notNull().defaultRandom(),
+    userId: uuid("userId")
+      .notNull()
+      .references(() => user.id),
+    dateKey: varchar("dateKey", { length: 10 }).notNull(),
+    count: integer("count").notNull().default(0),
+    createdAt: timestamp("createdAt").notNull(),
+    updatedAt: timestamp("updatedAt").notNull(),
+  },
+  (table) => ({
+    userIdDateKeyUnique: uniqueIndex("DailyChatUsage_userId_dateKey_key").on(
+      table.userId,
+      table.dateKey
+    ),
+  })
+);
+
+export type DailyChatUsage = InferSelectModel<typeof dailyChatUsage>;

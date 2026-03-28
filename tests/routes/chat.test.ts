@@ -24,6 +24,27 @@ function normalizeStreamData(lines: string[]): string[] {
   });
 }
 
+async function createChatRequest({
+  request,
+  selectedVisibilityType = "private",
+}: {
+  request: { post: (url: string, options: { data: unknown }) => Promise<any> };
+  selectedVisibilityType?: "private" | "public";
+}) {
+  return request.post("/api/chat", {
+    data: {
+      id: generateUUID(),
+      message: {
+        ...TEST_PROMPTS.SKY.MESSAGE,
+        id: generateUUID(),
+        createdAt: new Date().toISOString(),
+      },
+      selectedChatModel: "chat-model",
+      selectedVisibilityType,
+    },
+  });
+}
+
 test.describe
   .serial("/api/chat", () => {
     test("Ada cannot invoke a chat generation with empty request body", async ({
@@ -64,6 +85,79 @@ test.describe
       expect(actualNormalized).toEqual(expectedNormalized);
 
       chatIdsCreatedByAda.push(chatId);
+    });
+
+    test("Guest user is limited to 10 chat requests/day", async ({ page }) => {
+      await page.goto("/");
+
+      for (let i = 0; i < 10; i++) {
+        const response = await createChatRequest({
+          request: page.context().request,
+        });
+
+        expect(response.status()).toBe(200);
+        await response.text();
+      }
+
+      const rateLimitedResponse = await createChatRequest({
+        request: page.context().request,
+      });
+
+      expect(rateLimitedResponse.status()).toBe(429);
+
+      const { code, message } = await rateLimitedResponse.json();
+      expect(code).toEqual("rate_limit:chat");
+      expect(message).toEqual(getMessageByErrorCode("rate_limit:chat"));
+    });
+
+    test("Regular user is limited to 30 chat requests/day", async ({
+      curieContext,
+    }) => {
+      for (let i = 0; i < 30; i++) {
+        const response = await createChatRequest({
+          request: curieContext.request,
+        });
+
+        expect(response.status()).toBe(200);
+        await response.text();
+      }
+
+      const rateLimitedResponse = await createChatRequest({
+        request: curieContext.request,
+      });
+
+      expect(rateLimitedResponse.status()).toBe(429);
+
+      const { code, message } = await rateLimitedResponse.json();
+      expect(code).toEqual("rate_limit:chat");
+      expect(message).toEqual(getMessageByErrorCode("rate_limit:chat"));
+    });
+
+    test("Unauthenticated requests do not count toward daily chat limits", async ({
+      browser,
+      page,
+    }) => {
+      const unauthenticatedContext = await browser.newContext();
+      const response = await unauthenticatedContext.request.post("/api/chat", {
+        data: {
+          id: generateUUID(),
+          message: TEST_PROMPTS.SKY.MESSAGE,
+          selectedChatModel: "chat-model",
+          selectedVisibilityType: "private",
+        },
+      });
+
+      expect(response.status()).toBe(401);
+
+      const guestContextResponse = await page.goto("/");
+      expect(guestContextResponse).not.toBeNull();
+
+      const guestChatResponse = await createChatRequest({
+        request: page.context().request,
+      });
+      expect(guestChatResponse.status()).toBe(200);
+
+      await unauthenticatedContext.close();
     });
 
     test("Babbage cannot append message to Ada's chat", async ({

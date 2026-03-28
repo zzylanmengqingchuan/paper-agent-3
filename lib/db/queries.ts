@@ -3,7 +3,6 @@ import "server-only";
 import {
   and,
   asc,
-  count,
   desc,
   eq,
   gt,
@@ -11,6 +10,7 @@ import {
   inArray,
   lt,
   type SQL,
+  sql,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -22,9 +22,11 @@ import { generateUUID } from "../utils";
 import {
   type Chat,
   chat,
+  dailyChatUsage,
   type DBMessage,
   document,
   message,
+  type DailyChatUsage,
   type Suggestion,
   stream,
   suggestion,
@@ -41,6 +43,28 @@ import { generateHashedPassword } from "./utils";
 // biome-ignore lint: Forbidden non-null assertion.
 const client = postgres(process.env.POSTGRES_URL!);
 const db = drizzle(client);
+
+const DAILY_CHAT_LIMIT_TIMEZONE = "Asia/Shanghai";
+
+export function getDateKeyInShanghai(now = new Date()) {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: DAILY_CHAT_LIMIT_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  const parts = formatter.formatToParts(now);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+
+  if (!year || !month || !day) {
+    throw new Error("Failed to build Shanghai date key");
+  }
+
+  return `${year}-${month}-${day}`;
+}
 
 export async function getUser(email: string): Promise<User[]> {
   try {
@@ -521,36 +545,81 @@ export async function updateChatLastContextById({
   }
 }
 
-export async function getMessageCountByUserId({
-  id,
-  differenceInHours,
+export async function getDailyChatRequestCountByUserId({
+  userId,
+  now,
 }: {
-  id: string;
-  differenceInHours: number;
+  userId: string;
+  now?: Date;
 }) {
   try {
-    const twentyFourHoursAgo = new Date(
-      Date.now() - differenceInHours * 60 * 60 * 1000
-    );
-
-    const [stats] = await db
-      .select({ count: count(message.id) })
-      .from(message)
-      .innerJoin(chat, eq(message.chatId, chat.id))
+    const dateKey = getDateKeyInShanghai(now);
+    const [usage] = await db
+      .select({ count: dailyChatUsage.count })
+      .from(dailyChatUsage)
       .where(
         and(
-          eq(chat.userId, id),
-          gte(message.createdAt, twentyFourHoursAgo),
-          eq(message.role, "user")
+          eq(dailyChatUsage.userId, userId),
+          eq(dailyChatUsage.dateKey, dateKey)
         )
       )
-      .execute();
+      .limit(1);
 
-    return stats?.count ?? 0;
+    return usage?.count ?? 0;
   } catch (_error) {
     throw new ChatSDKError(
       "bad_request:database",
-      "Failed to get message count by user id"
+      "Failed to get daily chat request count by user id"
+    );
+  }
+}
+
+export async function incrementDailyChatRequestCountByUserId({
+  userId,
+  maxRequestsPerDay,
+  now,
+}: {
+  userId: string;
+  maxRequestsPerDay: number;
+  now?: Date;
+}) {
+  const currentTime = now ?? new Date();
+  const currentTimestamp = currentTime.toISOString();
+  const dateKey = getDateKeyInShanghai(currentTime);
+
+  try {
+    const result = await db.execute<Pick<DailyChatUsage, "count">>(sql`
+      INSERT INTO "DailyChatUsage" (
+        "id",
+        "userId",
+        "dateKey",
+        "count",
+        "createdAt",
+        "updatedAt"
+      )
+      VALUES (
+        ${generateUUID()},
+        ${userId},
+        ${dateKey},
+        1,
+        ${currentTimestamp},
+        ${currentTimestamp}
+      )
+      ON CONFLICT ("userId", "dateKey")
+      DO UPDATE
+      SET
+        "count" = "DailyChatUsage"."count" + 1,
+        "updatedAt" = ${currentTimestamp}
+      WHERE "DailyChatUsage"."count" < ${maxRequestsPerDay}
+      RETURNING "count"
+    `);
+
+    const [usage] = result;
+    return usage?.count ?? null;
+  } catch (_error) {
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to increment daily chat request count by user id"
     );
   }
 }
