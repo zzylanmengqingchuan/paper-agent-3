@@ -3,6 +3,7 @@ import { classifyNode } from "@/lib/ai/agent/classify";
 import { createMockInterviewStream } from "@/lib/ai/agent/mock-interview";
 import { createResumeOptStream } from "@/lib/ai/agent/resume-opt";
 import type { ChatMessage } from "@/lib/types";
+import { getMostRecentUserMessage } from "@/lib/utils";
 
 export type AgentRouterInput = {
   messages: ChatMessage[];
@@ -13,32 +14,56 @@ export async function createSpecializedAgentStream({
   messages,
   selectedChatModel,
 }: AgentRouterInput) {
-  const { category } = await classifyNode({
-    messages,
-  });
+  const latestUserMessage = getMostRecentUserMessage(messages);
 
-  if (category === "resume_opt") {
+  try {
+    const classification = await Promise.race([
+      classifyNode({
+        messages: latestUserMessage ? [latestUserMessage as ChatMessage] : messages,
+      }),
+      new Promise<{ category: "others"; raw: null }>((resolve) =>
+        setTimeout(() => resolve({ category: "others", raw: null }), 3000)
+      ),
+    ]);
+
+    const { category, raw } = classification;
+
+    console.log("[agent] classification:", {
+      category,
+      raw,
+      selectedChatModel,
+    });
+
+    if (category === "resume_opt") {
+      return {
+        category,
+        result: createResumeOptStream({
+          messages,
+          selectedChatModel,
+        }),
+      };
+    }
+
+    if (category === "mock_interview") {
+      return {
+        category,
+        result: createMockInterviewStream({
+          messages,
+          selectedChatModel,
+        }),
+      };
+    }
+
     return {
       category,
-      result: createResumeOptStream({
-        messages,
-        selectedChatModel,
-      }),
+      result: null,
     };
-  }
+  } catch (error) {
+    console.warn("Agent classify failed, fallback to default chat", error);
 
-  if (category === "mock_interview") {
     return {
-      category,
-      result: createMockInterviewStream({
-        messages,
-        selectedChatModel,
-      }),
+      category: "others" as const,
+      result: null,
     };
   }
-
-  return {
-    category,
-    result: null,
-  };
 }
