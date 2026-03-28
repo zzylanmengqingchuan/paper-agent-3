@@ -3,6 +3,7 @@ import { createUsageOnFinish } from "@/lib/ai/agent/common";
 import type { ChatModel } from "@/lib/ai/models";
 import { regularPrompt } from "@/lib/ai/prompts";
 import { myProvider } from "@/lib/ai/providers";
+import { resumeTemplateTool } from "@/lib/ai/tools/resume-template";
 import type { ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { getTextFromMessage } from "@/lib/utils";
@@ -17,6 +18,7 @@ const resumeOptSystemPrompt = `${regularPrompt}
 - 需要提醒用户隐藏个人信息，例如姓名、电话、邮箱、身份证号、住址等敏感信息
 - 如果用户已经提供了简历文本内容，则基于你的专业经验进行评审和优化
 - 回复用户时，先给出点评和评分，再给出具体的修改建议
+- 如果用户想要“简历模板”“参考模板”“示例结构”，优先调用 resumeTemplate 工具获取模板，再结合用户场景给出说明
 - 输出内容要清晰、直接、专业，适合程序员阅读
 - 如果用户询问是否可以上传文件，请回复：「上传功能正在开发中，现在可把简历文本内容发过来。」
 
@@ -89,6 +91,10 @@ export function createResumeOptStream({
       system: resumeOptSystemPrompt,
       prompt:
         "用户还没有提供可用于优化的简历文本内容。请提醒用户直接粘贴简历文本，并说明你收到后会帮他优化表达、结构和亮点。",
+      experimental_activeTools: ["resumeTemplate"],
+      tools: {
+        resumeTemplate: resumeTemplateTool,
+      },
       onFinish,
     });
   }
@@ -97,6 +103,10 @@ export function createResumeOptStream({
     model: myProvider.languageModel(selectedChatModel),
     system: resumeOptSystemPrompt,
     messages: convertToModelMessages(messages),
+    experimental_activeTools: ["resumeTemplate"],
+    tools: {
+      resumeTemplate: resumeTemplateTool,
+    },
     onFinish,
   });
 }

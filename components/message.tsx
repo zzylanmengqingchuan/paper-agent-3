@@ -263,6 +263,37 @@ const PurePreviewMessage = ({
               );
             }
 
+            if (type === "tool-resumeTemplate") {
+              const { toolCallId, state } = part;
+
+              return (
+                <Tool defaultOpen={true} key={toolCallId}>
+                  <ToolHeader state={state} type="tool-resumeTemplate" />
+                  <ToolContent>
+                    {state === "input-available" && (
+                      <ToolInput input={part.input} />
+                    )}
+                    {state === "output-available" && (
+                      <ToolOutput
+                        errorText={undefined}
+                        output={
+                          "template" in part.output ? (
+                            <pre className="whitespace-pre-wrap break-words p-3 text-sm leading-6">
+                              {part.output.template}
+                            </pre>
+                          ) : (
+                            <div className="rounded border p-2 text-red-500">
+                              Tool output is invalid.
+                            </div>
+                          )
+                        }
+                      />
+                    )}
+                  </ToolContent>
+                </Tool>
+              );
+            }
+
             return null;
           })}
 
