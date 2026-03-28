@@ -1,9 +1,9 @@
+import { deepseek } from "@ai-sdk/deepseek";
 import {
   customProvider,
   extractReasoningMiddleware,
   wrapLanguageModel,
 } from "ai";
-import { deepseek } from "@ai-sdk/deepseek";
 import { isTestEnvironment } from "../constants";
 
 export const myProvider = isTestEnvironment
