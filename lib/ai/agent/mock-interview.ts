@@ -1,8 +1,10 @@
-import { convertToModelMessages, streamText } from "ai";
+import { convertToModelMessages, streamText, type UIMessageStreamWriter } from "ai";
+import { createUsageOnFinish } from "@/lib/ai/agent/common";
 import type { ChatModel } from "@/lib/ai/models";
 import { regularPrompt } from "@/lib/ai/prompts";
 import { myProvider } from "@/lib/ai/providers";
 import type { ChatMessage } from "@/lib/types";
+import type { AppUsage } from "@/lib/usage";
 
 const mockInterviewSystemPrompt = `${regularPrompt}
 
@@ -20,15 +22,26 @@ const mockInterviewSystemPrompt = `${regularPrompt}
 export type MockInterviewNodeInput = {
   messages: ChatMessage[];
   selectedChatModel?: ChatModel["id"];
+  dataStream: UIMessageStreamWriter<ChatMessage>;
+  setFinalUsage: (usage: AppUsage | undefined) => void;
 };
 
 export function createMockInterviewStream({
   messages,
   selectedChatModel = "chat-model",
+  dataStream,
+  setFinalUsage,
 }: MockInterviewNodeInput) {
+  const onFinish = createUsageOnFinish({
+    selectedChatModel,
+    dataStream,
+    setFinalUsage,
+  });
+
   return streamText({
     model: myProvider.languageModel(selectedChatModel),
     system: mockInterviewSystemPrompt,
     messages: convertToModelMessages(messages),
+    onFinish,
   });
 }
