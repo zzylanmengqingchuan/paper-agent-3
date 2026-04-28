@@ -36,6 +36,9 @@ yarn-error.log*
 .env
 .vercel
 .env*.local
+.cursor/
+.vscode/
+tsconfig.tsbuildinfo
 
 # Playwright
 /test-results/
